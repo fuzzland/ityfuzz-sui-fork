@@ -33,10 +33,6 @@ const E_BCS_SERIALIZATION_FAILURE: u64 = 3;
 macro_rules! get_or_fetch_object {
     ($context:ident, $ty_args:ident, $parent:ident, $child_id:ident, $ty_cost_per_byte:expr) => {{
         let child_ty = $ty_args.pop().unwrap();
-        native_charge_gas_early_exit!(
-            $context,
-            $ty_cost_per_byte * u64::from(child_ty.size()).into()
-        );
 
         assert!($ty_args.is_empty());
         let (tag, layout, annotated_layout) = match get_tag_and_layouts($context, &child_ty)? {
@@ -92,10 +88,6 @@ pub fn hash_type_and_key(
         .clone();
 
     // Charge base fee
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_hash_type_and_key_cost_params.dynamic_field_hash_type_and_key_cost_base
-    );
 
     let k_ty = ty_args.pop().unwrap();
     let k: Value = args.pop_back().unwrap();
@@ -104,25 +96,9 @@ pub fn hash_type_and_key(
     // Get size info for costing for derivations, serializations, etc
     let k_ty_size = u64::from(k_ty.size());
     let k_value_size = u64::from(k.legacy_size());
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_hash_type_and_key_cost_params
-            .dynamic_field_hash_type_and_key_type_cost_per_byte
-            * k_ty_size.into()
-            + dynamic_field_hash_type_and_key_cost_params
-                .dynamic_field_hash_type_and_key_value_cost_per_byte
-                * k_value_size.into()
-    );
 
     let k_tag = context.type_to_type_tag(&k_ty)?;
     let k_tag_size = u64::from(k_tag.abstract_size_for_gas_metering());
-
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_hash_type_and_key_cost_params
-            .dynamic_field_hash_type_and_key_type_tag_cost_per_byte
-            * k_tag_size.into()
-    );
 
     let cost = context.gas_used();
 
@@ -178,10 +154,6 @@ pub fn add_child_object(
         .clone();
 
     // Charge base fee
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_add_child_object_cost_params.dynamic_field_add_child_object_cost_base
-    );
 
     let child = args.pop_back().unwrap();
     let parent = pop_arg!(args, AccountAddress).into();
@@ -189,12 +161,6 @@ pub fn add_child_object(
 
     let child_value_size = u64::from(child.legacy_size());
     // ID extraction step
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_add_child_object_cost_params
-            .dynamic_field_add_child_object_value_cost_per_byte
-            * child_value_size.into()
-    );
 
     // TODO remove this copy_value, which will require VM changes
     let child_id = get_object_id(child.copy_value().unwrap())
@@ -204,13 +170,6 @@ pub fn add_child_object(
         .into();
     let child_ty = ty_args.pop().unwrap();
     let child_type_size = u64::from(child_ty.size());
-
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_add_child_object_cost_params
-            .dynamic_field_add_child_object_type_cost_per_byte
-            * child_type_size.into()
-    );
 
     assert!(ty_args.is_empty());
     let tag = match context.type_to_type_tag(&child_ty)? {
@@ -224,13 +183,6 @@ pub fn add_child_object(
     };
 
     let struct_tag_size = u64::from(tag.abstract_size_for_gas_metering());
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_add_child_object_cost_params
-            .dynamic_field_add_child_object_struct_tag_cost_per_byte
-            * struct_tag_size.into()
-    );
-
     let object_runtime: &mut ObjectRuntime = context.extensions_mut().get_mut();
     object_runtime.add_child_object(
         parent,
@@ -271,10 +223,6 @@ pub fn borrow_child_object(
         .get::<NativesCostTable>()
         .dynamic_field_borrow_child_object_cost_params
         .clone();
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_borrow_child_object_cost_params.dynamic_field_borrow_child_object_cost_base
-    );
 
     let child_id = pop_arg!(args, AccountAddress).into();
 
@@ -309,13 +257,6 @@ pub fn borrow_child_object(
         err
     })?;
 
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_borrow_child_object_cost_params
-            .dynamic_field_borrow_child_object_child_ref_cost_per_byte
-            * u64::from(child_ref.legacy_size()).into()
-    );
-
     Ok(NativeResult::ok(context.gas_used(), smallvec![child_ref]))
 }
 
@@ -347,10 +288,6 @@ pub fn remove_child_object(
         .get::<NativesCostTable>()
         .dynamic_field_remove_child_object_cost_params
         .clone();
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_remove_child_object_cost_params.dynamic_field_remove_child_object_cost_base
-    );
 
     let child_id = pop_arg!(args, AccountAddress).into();
     let parent = pop_arg!(args, AccountAddress).into();
@@ -377,12 +314,6 @@ pub fn remove_child_object(
         err
     })?;
 
-    native_charge_gas_early_exit!(
-        context,
-        dynamic_field_remove_child_object_cost_params
-            .dynamic_field_remove_child_object_child_cost_per_byte
-            * u64::from(child.legacy_size()).into()
-    );
 
     Ok(NativeResult::ok(context.gas_used(), smallvec![child]))
 }

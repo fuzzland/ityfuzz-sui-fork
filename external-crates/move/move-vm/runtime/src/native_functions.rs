@@ -59,8 +59,8 @@ pub fn make_table_from_iter<S: Into<Box<str>>>(
         .collect()
 }
 
-pub(crate) struct NativeFunctions(
-    HashMap<AccountAddress, HashMap<String, HashMap<String, NativeFunction>>>,
+pub struct NativeFunctions(
+    pub HashMap<AccountAddress, HashMap<String, HashMap<String, NativeFunction>>>,
 );
 
 impl NativeFunctions {
@@ -102,7 +102,7 @@ pub struct NativeContext<'a, 'b> {
 }
 
 impl<'a, 'b> NativeContext<'a, 'b> {
-    pub(crate) fn new(
+    pub fn new(
         interpreter: &'a mut Interpreter,
         data_store: &'a mut dyn DataStore,
         resolver: &'a Resolver<'a>,

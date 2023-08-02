@@ -4,7 +4,7 @@
 use crate::NativesCostTable;
 use move_binary_format::errors::PartialVMResult;
 use move_core_types::{account_address::AccountAddress, gas_algebra::InternalGas, u256::U256};
-use move_vm_runtime::{native_charge_gas_early_exit, native_functions::NativeContext};
+use move_vm_runtime::{native_functions::NativeContext};
 use move_vm_types::{
     loaded_data::runtime_types::Type, natives::function::NativeResult, pop_arg, values::Value,
 };
@@ -35,12 +35,6 @@ pub fn from_bytes(
         .get::<NativesCostTable>()
         .address_from_bytes_cost_params
         .clone();
-
-    // Charge base fee
-    native_charge_gas_early_exit!(
-        context,
-        address_from_bytes_cost_params.address_from_bytes_cost_base
-    );
 
     let addr_bytes = pop_arg!(args, Vec<u8>);
     let cost = context.gas_used();
@@ -76,11 +70,6 @@ pub fn to_u256(
         .clone();
 
     // Charge flat cost
-    native_charge_gas_early_exit!(
-        context,
-        address_to_u256_cost_params.address_to_u256_cost_base
-    );
-
     let addr = pop_arg!(args, AccountAddress);
     let mut addr_bytes_le = addr.to_vec();
     addr_bytes_le.reverse();
@@ -115,11 +104,6 @@ pub fn from_u256(
         .clone();
 
     // charge flat fee
-    native_charge_gas_early_exit!(
-        context,
-        address_from_u256_cost_params.address_from_u256_cost_base
-    );
-
     let u256 = pop_arg!(args, U256);
     let mut u256_bytes = u256.to_le_bytes().to_vec();
     u256_bytes.reverse();

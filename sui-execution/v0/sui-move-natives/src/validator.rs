@@ -37,18 +37,7 @@ pub fn validate_metadata_bcs(
         .validator_validate_metadata_bcs_cost_params
         .clone();
 
-    native_charge_gas_early_exit!(
-        context,
-        validator_validate_metadata_bcs_cost_params.validator_validate_metadata_cost_base
-    );
-
     let metadata_bytes = pop_arg!(args, Vec<u8>);
-
-    native_charge_gas_early_exit!(
-        context,
-        validator_validate_metadata_bcs_cost_params.validator_validate_metadata_data_cost_per_byte
-            * (metadata_bytes.len() as u64).into()
-    );
 
     let validator_metadata =
         bcs::from_bytes::<ValidatorMetadataV1>(&metadata_bytes).map_err(|_| {

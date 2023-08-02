@@ -71,18 +71,18 @@ pub struct RuntimeResults {
 }
 
 #[derive(Default)]
-pub(crate) struct ObjectRuntimeState {
-    pub(crate) input_objects: BTreeMap<ObjectID, Owner>,
+pub struct ObjectRuntimeState {
+    pub input_objects: BTreeMap<ObjectID, Owner>,
     // new ids from object::new
-    new_ids: Set<ObjectID>,
+    pub new_ids: Set<ObjectID>,
     // ids passed to object::delete
-    deleted_ids: Set<ObjectID>,
+    pub deleted_ids: Set<ObjectID>,
     // transfers to a new owner (shared, immutable, object, or account address)
     // TODO these struct tags can be removed if type_to_type_tag was exposed in the session
-    transfers: LinkedHashMap<ObjectID, (Owner, Type, Value)>,
-    events: Vec<(Type, StructTag, Value)>,
+    pub transfers: LinkedHashMap<ObjectID, (Owner, Type, Value)>,
+    pub events: Vec<(Type, StructTag, Value)>,
     // total size of events emitted so far
-    total_events_size: u64,
+    pub total_events_size: u64,
 }
 
 #[derive(Clone)]
@@ -135,7 +135,7 @@ pub struct ObjectRuntime<'a> {
     // inventories for test scenario
     pub(crate) test_inventories: TestInventories,
     // the internal state
-    pub(crate) state: ObjectRuntimeState,
+    pub state: ObjectRuntimeState,
     // whether or not this TX is gas metered
     is_metered: bool,
 

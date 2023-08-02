@@ -49,23 +49,23 @@ type ScriptHash = [u8; 32];
 // A simple cache that offers both a HashMap and a Vector lookup.
 // Values are forced into a `Arc` so they can be used from multiple thread.
 // Access to this cache is always under a `RwLock`.
-struct BinaryCache<K, V> {
-    id_map: HashMap<K, usize>,
-    binaries: Vec<Arc<V>>,
+pub struct BinaryCache<K, V> {
+    pub id_map: HashMap<K, usize>,
+    pub binaries: Vec<Arc<V>>,
 }
 
 impl<K, V> BinaryCache<K, V>
 where
     K: Eq + Hash,
 {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             id_map: HashMap::new(),
             binaries: vec![],
         }
     }
 
-    fn insert(&mut self, key: K, binary: V) -> PartialVMResult<&Arc<V>> {
+    pub fn insert(&mut self, key: K, binary: V) -> PartialVMResult<&Arc<V>> {
         let idx = self.binaries.len();
         // Last write wins in the binary cache -- it's up to the callee to not make conflicting
         // writes.
@@ -74,20 +74,20 @@ where
         Ok(&self.binaries[idx])
     }
 
-    fn get_with_idx(&self, key: &K) -> Option<(usize, &Arc<V>)> {
+    pub fn get_with_idx(&self, key: &K) -> Option<(usize, &Arc<V>)> {
         let idx = self.id_map.get(key)?;
         Some((*idx, self.binaries.get(*idx)?))
     }
 
-    fn get(&self, key: &K) -> Option<&Arc<V>> {
+    pub fn get(&self, key: &K) -> Option<&Arc<V>> {
         Some(self.get_with_idx(key)?.1)
     }
 
-    fn contains(&self, key: &K) -> bool {
+    pub fn contains(&self, key: &K) -> bool {
         self.id_map.contains_key(key)
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.binaries.len()
     }
 }
@@ -141,32 +141,32 @@ impl ScriptCache {
 /// ModuleCache via the Loader is under an RWLock.
 pub struct ModuleCache {
     /// Compiled modules go in this cache once they have been individually verified.
-    compiled_modules: BinaryCache<ModuleId, CompiledModule>,
+    pub compiled_modules: BinaryCache<ModuleId, CompiledModule>,
     /// Modules whose dependencies have been verified already (during publishing or loading).
-    verified_dependencies: BTreeSet<(AccountAddress, ModuleId)>,
+    pub verified_dependencies: BTreeSet<(AccountAddress, ModuleId)>,
     /// Loaded modules go in this cache once their compiled modules have been link-checked, and
     /// structs and functions have populated `structs` and `functions` below.
     ///
     /// The `AccountAddress` in the key is the "link context", and the `ModuleId` is the ID of the
     /// module whose load was requested. A mapping `(ctx, id) => module` means that when `id` was
     /// requested in context `ctx`, `module` was loaded.
-    loaded_modules: BinaryCache<(AccountAddress, ModuleId), LoadedModule>,
+    pub loaded_modules: BinaryCache<(AccountAddress, ModuleId), LoadedModule>,
 
     /// Global cache of loaded structs, shared among all modules.
-    structs: BinaryCache<(ModuleId, Identifier), StructType>,
+    pub structs: BinaryCache<(ModuleId, Identifier), StructType>,
     /// Global list of loaded functions, shared among all modules.
-    functions: Vec<Arc<Function>>,
+    pub functions: Vec<Arc<Function>>,
 }
 
 /// Tracks the current end point of the `ModuleCache`'s `struct`s and `function`s, so that we can
 /// roll-back to that point in case of error.
-struct CacheCursor {
+pub struct CacheCursor {
     last_struct: usize,
     last_function: usize,
 }
 
 impl ModuleCache {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             compiled_modules: BinaryCache::new(),
             verified_dependencies: BTreeSet::new(),
@@ -182,13 +182,13 @@ impl ModuleCache {
 
     // Retrieve a module by `ModuleId`. The module may have not been loaded yet in which
     // case `None` is returned
-    fn compiled_module_at(&self, id: &ModuleId) -> Option<Arc<CompiledModule>> {
+    pub fn compiled_module_at(&self, id: &ModuleId) -> Option<Arc<CompiledModule>> {
         self.compiled_modules.get(id).map(Arc::clone)
     }
 
     // Retrieve a module by `ModuleId`. The module may have not been loaded yet in which
     // case `None` is returned
-    fn loaded_module_at(
+    pub fn loaded_module_at(
         &self,
         link_context: AccountAddress,
         runtime_id: &ModuleId,
@@ -199,12 +199,12 @@ impl ModuleCache {
     }
 
     // Retrieve a function by index
-    fn function_at(&self, idx: usize) -> Arc<Function> {
+    pub fn function_at(&self, idx: usize) -> Arc<Function> {
         Arc::clone(&self.functions[idx])
     }
 
     // Retrieve a struct by index
-    fn struct_at(&self, idx: CachedStructIndex) -> Arc<StructType> {
+    pub fn struct_at(&self, idx: CachedStructIndex) -> Arc<StructType> {
         Arc::clone(&self.structs.binaries[idx.0])
     }
 
@@ -213,7 +213,7 @@ impl ModuleCache {
     // The VM is pretty much stopped waiting for this to finish
     //
 
-    fn insert(
+    pub fn insert(
         &mut self,
         natives: &NativeFunctions,
         data_store: &impl DataStore,
@@ -224,6 +224,8 @@ impl ModuleCache {
         if let Some(cached) = self.loaded_module_at(data_store.link_context(), &runtime_id) {
             return Ok(cached);
         }
+
+        self.compiled_modules.insert(storage_id.clone(), module.clone());
 
         // Make sure the modules of dependencies are in the cache.
         for runtime_dep in module.immediate_dependencies() {
@@ -253,7 +255,7 @@ impl ModuleCache {
         }
     }
 
-    fn add_module(
+    pub fn add_module(
         &mut self,
         cursor: &CacheCursor,
         natives: &NativeFunctions,
@@ -396,7 +398,7 @@ impl ModuleCache {
     }
 
     // `make_type` is the entry point to "translate" a `SignatureToken` to a `Type`
-    fn make_type(&self, module: BinaryIndexedView, tok: &SignatureToken) -> PartialVMResult<Type> {
+    pub fn make_type(&self, module: BinaryIndexedView, tok: &SignatureToken) -> PartialVMResult<Type> {
         let res = match tok {
             SignatureToken::Bool => Type::Bool,
             SignatureToken::U8 => Type::U8,
@@ -447,7 +449,7 @@ impl ModuleCache {
         Ok(res)
     }
 
-    fn calculate_depth_of_struct(
+    pub fn calculate_depth_of_struct(
         &self,
         struct_type: &StructType,
         depth_cache: &mut BTreeMap<CachedStructIndex, DepthFormula>,
@@ -482,7 +484,7 @@ impl ModuleCache {
         Ok(formula)
     }
 
-    fn calculate_depth_of_type(
+    pub fn calculate_depth_of_type(
         &self,
         ty: &Type,
         depth_cache: &mut BTreeMap<CachedStructIndex, DepthFormula>,
@@ -530,7 +532,7 @@ impl ModuleCache {
 
     // Given a ModuleId::struct_name, retrieve the `StructType` and the index associated.
     // Return and error if the type has not been loaded
-    fn resolve_struct_by_name(
+    pub fn resolve_struct_by_name(
         &self,
         struct_name: &IdentStr,
         runtime_id: &ModuleId,
@@ -547,7 +549,7 @@ impl ModuleCache {
 
     // Given a ModuleId::func_name, retrieve the `Function` and the index associated.
     // Return and error if the function has not been loaded
-    fn resolve_function_by_name(
+    pub fn resolve_function_by_name(
         &self,
         func_name: &IdentStr,
         runtime_id: &ModuleId,
@@ -569,7 +571,7 @@ impl ModuleCache {
     }
 
     /// Return the current high watermark of structs and functions in the cache.
-    fn cursor(&self) -> CacheCursor {
+    pub fn cursor(&self) -> CacheCursor {
         CacheCursor {
             last_struct: self.structs.len(),
             last_function: self.functions.len(),
@@ -578,7 +580,7 @@ impl ModuleCache {
 
     /// Rollback the cache's structs and functions to the point at which the cache cursor was
     /// created.
-    fn reset(
+    pub fn reset(
         &mut self,
         CacheCursor {
             last_struct,
@@ -620,16 +622,16 @@ impl ModuleCache {
 // entities. Each cache is protected by a `RwLock`. Operation in the Loader must be thread safe
 // (operating on values on the stack) and when cache needs updating the mutex must be taken.
 // The `pub(crate)` API is what a Loader offers to the runtime.
-pub(crate) struct Loader {
+pub struct Loader {
     scripts: RwLock<ScriptCache>,
-    module_cache: RwLock<ModuleCache>,
+    pub module_cache: RwLock<ModuleCache>,
     type_cache: RwLock<TypeCache>,
     natives: NativeFunctions,
     vm_config: VMConfig,
 }
 
 impl Loader {
-    pub(crate) fn new(natives: NativeFunctions, vm_config: VMConfig) -> Self {
+    pub fn new(natives: NativeFunctions, vm_config: VMConfig) -> Self {
         Self {
             scripts: RwLock::new(ScriptCache::new()),
             module_cache: RwLock::new(ModuleCache::new()),
@@ -1359,7 +1361,7 @@ impl Loader {
             .map(Arc::clone)
     }
 
-    pub(crate) fn abilities(&self, ty: &Type) -> PartialVMResult<AbilitySet> {
+    pub fn abilities(&self, ty: &Type) -> PartialVMResult<AbilitySet> {
         match ty {
             Type::Bool
             | Type::U8
@@ -1409,7 +1411,7 @@ impl Loader {
 //
 
 // A simple wrapper for a `Module` or a `Script` in the `Resolver`
-enum BinaryType {
+pub enum BinaryType {
     Module {
         compiled: Arc<CompiledModule>,
         loaded: Arc<LoadedModule>,
@@ -1420,9 +1422,9 @@ enum BinaryType {
 // A Resolver is a simple and small structure allocated on the stack and used by the
 // interpreter. It's the only API known to the interpreter and it's tailored to the interpreter
 // needs.
-pub(crate) struct Resolver<'a> {
-    loader: &'a Loader,
-    binary: BinaryType,
+pub struct Resolver<'a> {
+    pub loader: &'a Loader,
+    pub binary: BinaryType,
 }
 
 impl<'a> Resolver<'a> {
@@ -1455,7 +1457,7 @@ impl<'a> Resolver<'a> {
     // Function resolution
     //
 
-    pub(crate) fn function_from_handle(&self, idx: FunctionHandleIndex) -> Arc<Function> {
+    pub fn function_from_handle(&self, idx: FunctionHandleIndex) -> Arc<Function> {
         let idx = match &self.binary {
             BinaryType::Module { loaded, .. } => loaded.function_at(idx.0),
             BinaryType::Script(script) => script.function_at(idx.0),
@@ -1463,7 +1465,7 @@ impl<'a> Resolver<'a> {
         self.loader.function_at(idx)
     }
 
-    pub(crate) fn function_from_instantiation(
+    pub fn function_from_instantiation(
         &self,
         idx: FunctionInstantiationIndex,
     ) -> Arc<Function> {
@@ -1474,7 +1476,7 @@ impl<'a> Resolver<'a> {
         self.loader.function_at(func_inst.handle)
     }
 
-    pub(crate) fn instantiate_generic_function(
+    pub fn instantiate_generic_function(
         &self,
         idx: FunctionInstantiationIndex,
         type_params: &[Type],
@@ -1741,7 +1743,7 @@ impl<'a> Resolver<'a> {
 // When code executes indexes in instructions are resolved against those runtime structure
 // so that any data needed for execution is immediately available
 #[derive(Debug)]
-pub(crate) struct LoadedModule {
+pub struct LoadedModule {
     #[allow(dead_code)]
     id: ModuleId,
 
@@ -1991,7 +1993,7 @@ impl LoadedModule {
 /// When code executes, indexes in instructions are resolved against runtime structures
 /// (rather then "compiled") to make available data needed for execution
 /// #[derive(Debug)]
-struct LoadedScript {
+pub struct LoadedScript {
     // primitive pools
     script: CompiledScript,
 
@@ -2196,7 +2198,7 @@ impl LoadedScript {
 
 // A simple wrapper for the "owner" of the function (Module or Script)
 #[derive(Debug)]
-enum Scope {
+pub enum Scope {
     Module(ModuleId),
     Script(ScriptHash),
 }
@@ -2204,12 +2206,12 @@ enum Scope {
 // A runtime function
 // #[derive(Debug)]
 // https://github.com/rust-lang/rust/issues/70263
-pub(crate) struct Function {
+pub struct Function {
     #[allow(unused)]
     file_format_version: u32,
     index: FunctionDefinitionIndex,
     code: Vec<Bytecode>,
-    parameters: Signature,
+    pub parameters: Signature,
     return_: Signature,
     locals: Signature,
     type_parameters: Vec<AbilitySet>,
@@ -2217,10 +2219,10 @@ pub(crate) struct Function {
     def_is_native: bool,
     def_is_friend_or_private: bool,
     scope: Scope,
-    name: Identifier,
+    pub name: Identifier,
     return_types: Vec<Type>,
     local_types: Vec<Type>,
-    parameter_types: Vec<Type>,
+    pub parameter_types: Vec<Type>,
 }
 
 impl Function {
@@ -2320,7 +2322,7 @@ impl Function {
         }
     }
 
-    pub(crate) fn local_count(&self) -> usize {
+    pub fn local_count(&self) -> usize {
         self.locals.len()
     }
 
@@ -2348,7 +2350,7 @@ impl Function {
         &self.local_types
     }
 
-    pub(crate) fn return_types(&self) -> &[Type] {
+    pub fn return_types(&self) -> &[Type] {
         &self.return_types
     }
 
@@ -2368,7 +2370,7 @@ impl Function {
         }
     }
 
-    pub(crate) fn is_native(&self) -> bool {
+    pub fn is_native(&self) -> bool {
         self.def_is_native
     }
 
@@ -2376,7 +2378,7 @@ impl Function {
         self.def_is_friend_or_private
     }
 
-    pub(crate) fn get_native(&self) -> PartialVMResult<&UnboxedNativeFunction> {
+    pub fn get_native(&self) -> PartialVMResult<&UnboxedNativeFunction> {
         if cfg!(feature = "lazy_natives") {
             // If lazy_natives is configured, this is a MISSING_DEPENDENCY error, as we skip
             // checking those at module loading time.

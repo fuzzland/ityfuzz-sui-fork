@@ -75,15 +75,15 @@ enum InstrRet {
 ///
 /// An `Interpreter` instance is a stand alone execution context for a function.
 /// It mimics execution on a single thread, with an call stack and an operand stack.
-pub(crate) struct Interpreter {
+pub struct Interpreter {
     /// Operand stack, where Move `Value`s are stored for stack operations.
-    operand_stack: Stack,
+    pub operand_stack: Stack,
     /// The stack of active functions.
-    call_stack: CallStack,
+    pub call_stack: CallStack,
     /// Whether to perform a paranoid type safety checks at runtime.
-    paranoid_type_checks: bool,
+    pub paranoid_type_checks: bool,
     /// Limits imposed at runtime
-    runtime_limits_config: VMRuntimeLimitsConfig,
+    pub runtime_limits_config: VMRuntimeLimitsConfig,
 }
 
 struct TypeWithLoader<'a, 'b> {
@@ -215,7 +215,7 @@ impl Interpreter {
             let resolver = current_frame.resolver(link_context, loader);
             let exit_code =
                 current_frame //self
-                    .execute_code(&resolver, &mut self, data_store, gas_meter)
+                    .execute_code(&resolver, &mut self, data_store, gas_meter, &mut DummyTracer{})
                     .map_err(|err| self.maybe_core_dump(err, &current_frame))?;
             match exit_code {
                 ExitCode::Return => {
@@ -983,14 +983,14 @@ const OPERAND_STACK_SIZE_LIMIT: usize = 1024;
 const CALL_STACK_SIZE_LIMIT: usize = 1024;
 
 /// The operand stack.
-struct Stack {
-    value: Vec<Value>,
-    types: Vec<Type>,
+pub struct Stack {
+    pub value: Vec<Value>,
+    pub types: Vec<Type>,
 }
 
 impl Stack {
     /// Create a new empty operand stack.
-    fn new() -> Self {
+    pub fn new() -> Self {
         Stack {
             value: vec![],
             types: vec![],
@@ -999,7 +999,7 @@ impl Stack {
 
     /// Push a `Value` on the stack if the max stack size has not been reached. Abort execution
     /// otherwise.
-    fn push(&mut self, value: Value) -> PartialVMResult<()> {
+    pub fn push(&mut self, value: Value) -> PartialVMResult<()> {
         if self.value.len() < OPERAND_STACK_SIZE_LIMIT {
             self.value.push(value);
             Ok(())
@@ -1009,7 +1009,7 @@ impl Stack {
     }
 
     /// Pop a `Value` off the stack or abort execution if the stack is empty.
-    fn pop(&mut self) -> PartialVMResult<Value> {
+    pub fn pop(&mut self) -> PartialVMResult<Value> {
         self.value
             .pop()
             .ok_or_else(|| PartialVMError::new(StatusCode::EMPTY_VALUE_STACK))
@@ -1086,16 +1086,16 @@ impl Stack {
 
 /// A call stack.
 // #[derive(Debug)]
-struct CallStack(Vec<Frame>);
+pub struct CallStack(Vec<Frame>);
 
 impl CallStack {
     /// Create a new empty call stack.
-    fn new() -> Self {
+    pub fn new() -> Self {
         CallStack(vec![])
     }
 
     /// Push a `Frame` on the call stack.
-    fn push(&mut self, frame: Frame) -> ::std::result::Result<(), Frame> {
+    pub fn push(&mut self, frame: Frame) -> ::std::result::Result<(), Frame> {
         if self.0.len() < CALL_STACK_SIZE_LIMIT {
             self.0.push(frame);
             Ok(())
@@ -1105,7 +1105,7 @@ impl CallStack {
     }
 
     /// Pop a `Frame` off the call stack.
-    fn pop(&mut self) -> Option<Frame> {
+    pub fn pop(&mut self) -> Option<Frame> {
         self.0.pop()
     }
 
@@ -1118,20 +1118,30 @@ impl CallStack {
 /// A `Frame` is the execution context for a function. It holds the locals of the function and
 /// the function itself.
 // #[derive(Debug)]
-struct Frame {
-    pc: u16,
-    locals: Locals,
-    function: Arc<Function>,
-    ty_args: Vec<Type>,
-    local_tys: Vec<Type>,
+pub struct Frame {
+    pub pc: u16,
+    pub locals: Locals,
+    pub function: Arc<Function>,
+    pub ty_args: Vec<Type>,
+    pub local_tys: Vec<Type>,
 }
 
 /// An `ExitCode` from `execute_code_unit`.
 #[derive(Debug)]
-enum ExitCode {
+pub enum ExitCode {
     Return,
     Call(FunctionHandleIndex),
     CallGeneric(FunctionInstantiationIndex),
+}
+
+pub trait ItyFuzzTracer {
+    fn on_step(&mut self, interpreter: &Interpreter, frame: &Frame, pc: u16, instruction: &Bytecode);
+}
+
+pub struct DummyTracer;
+
+impl ItyFuzzTracer for DummyTracer {
+    fn on_step(&mut self, _interpreter: &Interpreter, _frame: &Frame, _pc: u16, instruction: &Bytecode) {}
 }
 
 fn check_ability(has_ability: bool) -> PartialVMResult<()> {
@@ -1147,14 +1157,15 @@ fn check_ability(has_ability: bool) -> PartialVMResult<()> {
 
 impl Frame {
     /// Execute a Move function until a return or a call opcode is found.
-    fn execute_code(
+    pub fn execute_code<TR: ItyFuzzTracer>(
         &mut self,
         resolver: &Resolver,
         interpreter: &mut Interpreter,
         data_store: &mut impl DataStore,
         gas_meter: &mut impl GasMeter,
+        tracer: &mut TR,
     ) -> VMResult<ExitCode> {
-        self.execute_code_impl(resolver, interpreter, data_store, gas_meter)
+        self.execute_code_impl(resolver, interpreter, data_store, gas_meter, tracer)
             .map_err(|e| {
                 let e = if resolver.loader().vm_config().error_execution_state {
                     e.with_exec_state(interpreter.get_internal_state())
@@ -2315,12 +2326,13 @@ impl Frame {
 
         Ok(InstrRet::Ok)
     }
-    fn execute_code_impl(
+    fn execute_code_impl<TR: ItyFuzzTracer>(
         &mut self,
         resolver: &Resolver,
         interpreter: &mut Interpreter,
         data_store: &mut impl DataStore,
         gas_meter: &mut impl GasMeter,
+        tracer: &mut TR,
     ) -> PartialVMResult<ExitCode> {
         let code = self.function.code();
         loop {
@@ -2332,6 +2344,13 @@ impl Frame {
                     instruction,
                     resolver,
                     interpreter
+                );
+
+                tracer.on_step(
+                    interpreter,
+                    self,
+                    self.pc,
+                    instruction,
                 );
 
                 fail_point!("move_vm::interpreter_loop", |_| {
@@ -2421,7 +2440,7 @@ impl Frame {
         &self.ty_args
     }
 
-    fn resolver<'a>(&self, link_context: AccountAddress, loader: &'a Loader) -> Resolver<'a> {
+    pub fn resolver<'a>(&self, link_context: AccountAddress, loader: &'a Loader) -> Resolver<'a> {
         self.function.get_resolver(link_context, loader)
     }
 
