@@ -59,7 +59,7 @@ jobs:
 
       - name: Setup protoc (Windows)
         if: ${{ matrix.os == 'windows-ghcloud' && env.sui_tag != 'main'  }}
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@v2
         # this avoids rate-limiting
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
