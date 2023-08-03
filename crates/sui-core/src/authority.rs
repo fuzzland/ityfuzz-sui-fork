@@ -6,6 +6,7 @@ use crate::authority::authority_store_types::{StoreObject, StoreObjectWrapper};
 use crate::verify_indexes::verify_indexes;
 use anyhow::anyhow;
 use arc_swap::{ArcSwap, Guard};
+use async_trait::async_trait;
 use chrono::prelude::*;
 use fastcrypto::encoding::Base58;
 use fastcrypto::encoding::Encoding;
@@ -31,7 +32,13 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use std::{collections::HashMap, fs, pin::Pin, sync::Arc, thread};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    pin::Pin,
+    sync::Arc,
+    thread,
+};
 use sui_config::node::StateDebugDumpConfig;
 use sui_config::NodeConfig;
 use tap::{TapFallible, TapOptional};
@@ -66,6 +73,8 @@ use sui_json_rpc_types::{
 use sui_macros::{fail_point, fail_point_async};
 use sui_protocol_config::{ProtocolConfig, SupportedProtocolVersions};
 use sui_storage::indexes::{CoinInfo, ObjectIndexChanges};
+use sui_storage::key_value_store::{TransactionKeyValueStore, TransactionKeyValueStoreTrait};
+use sui_storage::key_value_store_metrics::KeyValueStoreMetrics;
 use sui_storage::IndexStore;
 use sui_types::committee::{EpochId, ProtocolVersion};
 use sui_types::crypto::{
@@ -85,8 +94,9 @@ use sui_types::executable_transaction::VerifiedExecutableTransaction;
 use sui_types::gas::{GasCharger, GasCostSummary, SuiGasStatus};
 use sui_types::message_envelope::Message;
 use sui_types::messages_checkpoint::{
-    CheckpointCommitment, CheckpointContents, CheckpointContentsDigest, CheckpointDigest,
-    CheckpointSequenceNumber, CheckpointSummary, CheckpointTimestamp, VerifiedCheckpoint,
+    CertifiedCheckpointSummary, CheckpointCommitment, CheckpointContents, CheckpointContentsDigest,
+    CheckpointDigest, CheckpointSequenceNumber, CheckpointSummary, CheckpointTimestamp,
+    VerifiedCheckpoint,
 };
 use sui_types::messages_checkpoint::{CheckpointRequest, CheckpointResponse};
 use sui_types::messages_consensus::AuthorityCapabilities;
@@ -2859,8 +2869,26 @@ impl AuthorityState {
             .loaded_child_object_versions(transaction_digest)
     }
 
-    pub fn get_transactions(
+    pub async fn get_transactions_for_tests(
+        self: &Arc<Self>,
+        filter: Option<TransactionFilter>,
+        cursor: Option<TransactionDigest>,
+        limit: Option<usize>,
+        reverse: bool,
+    ) -> SuiResult<Vec<TransactionDigest>> {
+        let metrics = KeyValueStoreMetrics::new_for_tests();
+        let kv_store = Arc::new(TransactionKeyValueStore::new(
+            "rocksdb",
+            metrics,
+            self.clone(),
+        ));
+        self.get_transactions(&kv_store, filter, cursor, limit, reverse)
+            .await
+    }
+
+    pub async fn get_transactions(
         &self,
+        kv_store: &Arc<TransactionKeyValueStore>,
         filter: Option<TransactionFilter>,
         // If `Some`, the query will start from the next item after the specified cursor
         cursor: Option<TransactionDigest>,
@@ -2868,8 +2896,7 @@ impl AuthorityState {
         reverse: bool,
     ) -> SuiResult<Vec<TransactionDigest>> {
         if let Some(TransactionFilter::Checkpoint(sequence_number)) = filter {
-            let checkpoint_contents =
-                self.get_checkpoint_contents_by_sequence_number(sequence_number)?;
+            let checkpoint_contents = kv_store.get_checkpoint_contents(sequence_number).await?;
             let iter = checkpoint_contents.iter().map(|c| c.transaction);
             if reverse {
                 let iter = iter
@@ -3068,8 +3095,9 @@ impl AuthorityState {
         Ok(checkpoints)
     }
 
-    pub fn query_events(
+    pub async fn query_events(
         &self,
+        kv_store: &Arc<TransactionKeyValueStore>,
         query: EventFilter,
         // If `Some`, the query will start from the next item after the specified cursor
         cursor: Option<EventID>,
@@ -3160,25 +3188,42 @@ impl AuthorityState {
         } else {
             event_keys.truncate(limit - 1);
         }
-        let keys = event_keys.iter().map(|(digest, _, seq, _)| (*digest, *seq));
 
-        let stored_events = self
-            .database
-            .perpetual_tables
-            .events
-            .multi_get(keys)?
+        // get the unique set of digests from the event_keys
+        let event_digests = event_keys
+            .iter()
+            .map(|(digest, _, _, _)| *digest)
+            .collect::<HashSet<_>>()
             .into_iter()
-            .zip(event_keys.into_iter())
-            .map(|(e, (digest, tx_digest, event_seq, timestamp))| {
-                e.map(|e| (e, tx_digest, event_seq, timestamp))
+            .collect::<Vec<_>>();
+
+        let events = kv_store.multi_get_events(&event_digests).await?;
+
+        let events_map: HashMap<_, _> = event_digests.iter().zip(events.into_iter()).collect();
+
+        let stored_events = event_keys
+            .into_iter()
+            .map(|k| {
+                (
+                    k,
+                    events_map
+                        .get(&k.0)
+                        .expect("fetched digest is missing")
+                        .clone()
+                        .and_then(|e| e.data.get(k.2).cloned()),
+                )
+            })
+            .map(|((digest, tx_digest, event_seq, timestamp), event)| {
+                event
+                    .map(|e| (e, tx_digest, event_seq, timestamp))
                     .ok_or(SuiError::TransactionEventsNotFound { digest })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut events = vec![];
-        for (e, tx_digest, event_seq, timestamp) in stored_events {
+        for (e, tx_digest, event_seq, timestamp) in stored_events.into_iter() {
             events.push(SuiEvent::try_from(
-                e,
+                e.clone(),
                 tx_digest,
                 event_seq as u64,
                 Some(timestamp),
@@ -4050,6 +4095,96 @@ impl AuthorityState {
             .unwrap()
             .send(())
             .unwrap();
+    }
+}
+
+#[async_trait]
+impl TransactionKeyValueStoreTrait for AuthorityState {
+    async fn multi_get(
+        &self,
+        transactions: &[TransactionDigest],
+        effects: &[TransactionDigest],
+        events: &[TransactionEventsDigest],
+    ) -> SuiResult<(
+        Vec<Option<Transaction>>,
+        Vec<Option<TransactionEffects>>,
+        Vec<Option<TransactionEvents>>,
+    )> {
+        let txns = if !transactions.is_empty() {
+            self.database
+                .multi_get_transaction_blocks(transactions)?
+                .into_iter()
+                .map(|t| t.map(|t| t.into_inner()))
+                .collect()
+        } else {
+            vec![]
+        };
+
+        let fx = if !effects.is_empty() {
+            self.database.multi_get_executed_effects(effects)?
+        } else {
+            vec![]
+        };
+
+        let evts = if !events.is_empty() {
+            self.database.multi_get_events(events)?
+        } else {
+            vec![]
+        };
+
+        Ok((txns, fx, evts))
+    }
+
+    async fn multi_get_checkpoints(
+        &self,
+        checkpoint_summaries: &[CheckpointSequenceNumber],
+        checkpoint_contents: &[CheckpointSequenceNumber],
+        checkpoint_summaries_by_digest: &[CheckpointDigest],
+        checkpoint_contents_by_digest: &[CheckpointContentsDigest],
+    ) -> SuiResult<(
+        Vec<Option<CertifiedCheckpointSummary>>,
+        Vec<Option<CheckpointContents>>,
+        Vec<Option<CertifiedCheckpointSummary>>,
+        Vec<Option<CheckpointContents>>,
+    )> {
+        // TODO: use multi-get methods if it ever becomes important (unlikely)
+        let mut summaries = Vec::with_capacity(checkpoint_summaries.len());
+        let store = self.get_checkpoint_store();
+        for seq in checkpoint_summaries {
+            let checkpoint = store
+                .get_checkpoint_by_sequence_number(*seq)?
+                .map(|c| c.into_inner());
+
+            summaries.push(checkpoint);
+        }
+
+        let mut contents = Vec::with_capacity(checkpoint_contents.len());
+        for seq in checkpoint_contents {
+            let checkpoint = store
+                .get_checkpoint_by_sequence_number(*seq)?
+                .and_then(|summary| {
+                    store
+                        .get_checkpoint_contents(&summary.content_digest)
+                        .expect("db read cannot fail")
+                });
+            contents.push(checkpoint);
+        }
+
+        let mut summaries_by_digest = Vec::with_capacity(checkpoint_summaries_by_digest.len());
+        for digest in checkpoint_summaries_by_digest {
+            let checkpoint = store
+                .get_checkpoint_by_digest(digest)?
+                .map(|c| c.into_inner());
+            summaries_by_digest.push(checkpoint);
+        }
+
+        let mut contents_by_digest = Vec::with_capacity(checkpoint_contents_by_digest.len());
+        for digest in checkpoint_contents_by_digest {
+            let checkpoint = store.get_checkpoint_contents(digest)?;
+            contents_by_digest.push(checkpoint);
+        }
+
+        Ok((summaries, contents, summaries_by_digest, contents_by_digest))
     }
 }
 
