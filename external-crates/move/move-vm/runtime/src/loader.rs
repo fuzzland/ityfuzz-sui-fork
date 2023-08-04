@@ -2461,7 +2461,7 @@ struct StructInfo {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-enum StructTagType {
+pub enum StructTagType {
     Runtime,
     Defining,
 }
@@ -2519,7 +2519,7 @@ impl Loader {
         }
     }
 
-    fn struct_gidx_to_type_tag(
+    pub fn struct_gidx_to_type_tag(
         &self,
         gidx: CachedStructIndex,
         ty_args: &[Type],
