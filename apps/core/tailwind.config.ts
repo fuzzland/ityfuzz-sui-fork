@@ -39,6 +39,7 @@ export default {
 				DEFAULT: '#6fbcf0',
 				bright: '#2A38EB',
 				light: '#E1F3FF',
+				primaryBlue2023: '#4CA3FF',
 				lightest: '#F1F8FD',
 				dark: '#1F6493',
 			},
@@ -163,7 +164,6 @@ export default {
 				verticalListLong: '35.6875rem',
 				600: '37.5rem',
 				header: '68px',
-				headerNetworkDegrade: '102.2px',
 			},
 			height: {
 				31.5: '7.5rem',
