@@ -2408,7 +2408,7 @@ impl Function {
             def_is_native: false,
             def_is_friend_or_private: false,
             scope: Scope::Module(ModuleId::new(
-                AccountAddress::from([0; 32]),
+                AccountAddress::ZERO,
                 Identifier::new("test").unwrap(),
             )),
             name: Identifier::new("test").unwrap(),
