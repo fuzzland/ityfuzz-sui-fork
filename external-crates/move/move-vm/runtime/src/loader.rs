@@ -2394,6 +2394,29 @@ impl Function {
             })
         }
     }
+
+    pub fn new_dummy(parameter_types: Vec<Type>) -> Self {
+        Self {
+            file_format_version: 0,
+            index: Default::default(),
+            code: vec![],
+            parameters: Default::default(),
+            return_: Default::default(),
+            locals: Default::default(),
+            type_parameters: vec![],
+            native: None,
+            def_is_native: false,
+            def_is_friend_or_private: false,
+            scope: Scope::Module(ModuleId::new(
+                AccountAddress::ZERO,
+                Identifier::new("test").unwrap(),
+            )),
+            name: Identifier::new("test").unwrap(),
+            return_types: vec![],
+            local_types: vec![],
+            parameter_types,
+        }
+    }
 }
 
 //
